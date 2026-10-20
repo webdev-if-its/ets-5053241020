@@ -177,6 +177,27 @@ func (a *API) createPeminjaman(w http.ResponseWriter, r *http.Request) {
 		Jumlah:       in.Jumlah,
 	})
 	if err != nil {
+
+		if errors.Is(err, ErrBentrok) {
+
+			konflik := a.store.daftarBentrok(Peminjaman{
+				SumberDayaID: in.SumberDayaID,
+				Tanggal:      in.Tanggal,
+				SlotMulai:    in.SlotMulai,
+				SlotSelesai:  in.SlotSelesai,
+				Jumlah:       in.Jumlah,
+			})
+
+			writeJSON(
+				w,
+				http.StatusConflict,
+				bentrokBody{
+					Error:         err.Error(),
+					BentrokDengan: konflik,
+				},
+			)
+			return
+		}
 		writeError(w, err)
 		return
 	}
