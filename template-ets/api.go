@@ -50,6 +50,9 @@ func (a *API) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /peminjaman", a.createPeminjaman)
 	mux.HandleFunc("GET /peminjaman", a.listPeminjaman)
 	mux.HandleFunc("GET /peminjaman/{id}", a.getPeminjaman)
+	mux.HandleFunc("PUT /peminjaman/{id}", a.updatePeminjaman)
+	mux.HandleFunc("DELETE /peminjaman/{id}", a.deletePeminjaman)
+	mux.HandleFunc("GET /sumber-daya/{id}/ketersediaan", a.getKetersediaan)
 	return mux
 }
 
@@ -67,11 +70,52 @@ func writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, errorBody{Error: err.Error()})
 	case errors.Is(err, ErrInputTidakValid):
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: err.Error()})
+	case errors.Is(err, ErrBentrok):
+		writeJSON(w, http.StatusConflict, errorBody{Error: err.Error()})
 	default:
-		// Detail asli hanya ke log server, klien menerima pesan generik.
 		log.Printf("error internal: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorBody{Error: "terjadi kesalahan internal"})
 	}
+}
+
+// Validasi
+func validasiSumberDaya(in sumberDayaInput) error {
+	if in.Nama == "" {
+		return errInput("nama wajib diisi")
+	}
+	if utf8.RuneCountInString(in.Nama) > 50 {
+		return errInput("nama maksimal 50 karakter")
+	}
+	if in.Jenis != "ruang" && in.Jenis != "alat" {
+		return errInput(`jenis harus "ruang" atau "alat"`)
+	}
+	if in.Stok < 1 {
+		return errInput("stok minimal 1")
+	}
+	return nil
+}
+
+func validasiPeminjaman(in peminjamanInput) error {
+	if in.Peminjam == "" {
+		return errInput("peminjam wajib diisi")
+	}
+	if utf8.RuneCountInString(in.Peminjam) > 50 {
+		return errInput("peminjam maksimal 50 karakter")
+	}
+	// time.Parse menolak tanggal yang tidak ada (30 Februari), dan menerima 29 Feb 2028.
+	if _, err := time.Parse("2006-01-02", in.Tanggal); err != nil {
+		return errInput("tanggal harus berformat YYYY-MM-DD dan tanggal yang valid")
+	}
+	if in.SlotMulai < 1 || in.SlotMulai > 8 || in.SlotSelesai < 1 || in.SlotSelesai > 8 {
+		return errInput("slot harus antara 1 sampai 8")
+	}
+	if in.SlotMulai > in.SlotSelesai {
+		return errInput("slot_mulai tidak boleh lebih besar dari slot_selesai")
+	}
+	if in.Jumlah < 1 {
+		return errInput("jumlah minimal 1")
+	}
+	return nil
 }
 
 // POST /sumber-daya
@@ -171,41 +215,113 @@ func (a *API) getPeminjaman(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-func validasiSumberDaya(in sumberDayaInput) error {
-	if in.Nama == "" {
-		return errInput("nama wajib diisi")
+// PUT /peminjaman/{id}
+func (a *API) updatePeminjaman(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "id harus berupa angka"})
+		return
 	}
-	if utf8.RuneCountInString(in.Nama) > 50 { // per karakter, bukan per byte
-		return errInput("nama maksimal 50 karakter")
+	if _, err := a.store.GetPeminjaman(id); err != nil {
+		writeError(w, err)
+		return
 	}
-	if in.Jenis != "ruang" && in.Jenis != "alat" {
-		return errInput(`jenis harus "ruang" atau "alat"`)
+	var in peminjamanInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "body bukan JSON yang valid"})
+		return
 	}
-	if in.Stok < 1 {
-		return errInput("stok minimal 1")
+	in.Peminjam = strings.TrimSpace(in.Peminjam)
+	in.Tanggal = strings.TrimSpace(in.Tanggal)
+	if err := validasiPeminjaman(in); err != nil {
+		writeError(w, err)
+		return
 	}
-	return nil
+	p, err := a.store.UpdatePeminjaman(id, Peminjaman{
+		SumberDayaID: in.SumberDayaID,
+		Peminjam:     in.Peminjam,
+		Tanggal:      in.Tanggal,
+		SlotMulai:    in.SlotMulai,
+		SlotSelesai:  in.SlotSelesai,
+		Jumlah:       in.Jumlah,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
 }
 
-func validasiPeminjaman(in peminjamanInput) error {
-	if in.Peminjam == "" {
-		return errInput("peminjam wajib diisi")
+// DELETE /peminjaman/{id}
+func (a *API) deletePeminjaman(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "id harus berupa angka"})
+		return
 	}
-	if utf8.RuneCountInString(in.Peminjam) > 50 {
-		return errInput("peminjam maksimal 50 karakter")
+	if err := a.store.DeletePeminjaman(id); err != nil {
+		writeError(w, err)
+		return
 	}
-	// time.Parse menolak tanggal yang tidak ada (30 Februari), dan menerima 29 Feb 2028.
-	if _, err := time.Parse("2006-01-02", in.Tanggal); err != nil {
-		return errInput("tanggal harus berformat YYYY-MM-DD dan tanggal yang valid")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /sumber-daya/{id}/ketersediaan
+func (a *API) getKetersediaan(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w,
+			http.StatusBadRequest,
+			errorBody{
+				Error: "id harus berupa angka",
+			},
+		)
+		return
 	}
-	if in.SlotMulai < 1 || in.SlotMulai > 8 || in.SlotSelesai < 1 || in.SlotSelesai > 8 {
-		return errInput("slot harus antara 1 sampai 8")
+
+	tanggal := strings.TrimSpace(
+		r.URL.Query().Get("tanggal"),
+	)
+
+	if tanggal == "" {
+		writeError(
+			w,
+			errInput("tanggal wajib diisi"),
+		)
+		return
 	}
-	if in.SlotMulai > in.SlotSelesai {
-		return errInput("slot_mulai tidak boleh lebih besar dari slot_selesai")
+
+	if _, err := time.Parse(
+		"2006-01-02",
+		tanggal,
+	); err != nil {
+
+		writeError(
+			w,
+			errInput("tanggal tidak valid"),
+		)
+		return
 	}
-	if in.Jumlah < 1 {
-		return errInput("jumlah minimal 1")
+
+	slot, err := a.store.Ketersediaan(
+		id,
+		tanggal,
+	)
+
+	if err != nil {
+		writeError(w, err)
+		return
 	}
-	return nil
+
+	writeJSON(w,
+		http.StatusOK,
+		ketersediaanResponse{
+			SumberDayaID: id,
+			Tanggal:      tanggal,
+			Slot:         slot,
+		},
+	)
 }
