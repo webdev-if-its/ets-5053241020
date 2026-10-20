@@ -4,12 +4,13 @@ Catat setiap penggunaan AI yang menghasilkan kode. Jika tidak memakai AI sama se
 
 Log yang jujur tidak mengurangi nilai, sebanyak apa pun AI dipakai. Yang mengurangi nilai adalah log yang tidak sesuai dengan kode, atau isi log yang tidak bisa dijelaskan.
 
-## (Nama fitur atau fungsi, misalnya: Deteksi bentrok slot, B5)
-- Prompt: (ringkas, apa yang kamu minta)
-- Dipakai: (bagian kode yang kamu ambil, misalnya nama fungsi dan file)
-- Diubah: (apa yang kamu ubah atau perbaiki dari hasil AI, dan kenapa)
+## Deskripsi Tugas
+- Prompt: Menjelaskan step-by-step cara pengerjaan
+- Dipakai: Langkah-langkah pengerjaan
+- Diubah: Tidak ada
 
-## (Entri berikutnya)
-- Prompt:
-- Dipakai:
-- Diubah:
+## Koreksi Rancangan Struktur Data
+- Prompt: Mengirimkan struktur yang sudah saya buat, lalu minta koreksi
+- Dipakai: Struct Store, karena sebelumnya saya masih salah dalam membuat struct Store
+- Diubah: Sisanya menggunakan rancangan yang sudah saya buat
+
